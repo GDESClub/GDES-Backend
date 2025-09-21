@@ -12,15 +12,15 @@ require('dotenv').config();
 const { UserSchema } = require('./Schemas/UserSchema');
 const { ActivitySchema } = require('./Schemas/ActivitySchema');
 const { TempUserSchema } = require('./Schemas/TempUseSchema');
+
 const port = process.env.PORT || 3000;
 const URL = process.env.MONGOURL;
 const app = express();
 
+// Middlewares
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
-
-// Going to restrict access when frontend is deployed.
 app.use(cors());
 
 const templatePath = path.join(__dirname, "/templates");
@@ -30,67 +30,79 @@ app.set('view engine', 'hbs');
 app.set('views', templatePath);
 app.use(express.static(publicPath));
 
-// Connect to MongoDB
+// MongoDB connection
 mongoose.connect(URL);
 const db = mongoose.connection;
 
-db.once('open', () => {
-    console.log("✅ Successfully connected to MongoDB Atlas.");
-});
-db.on('error', (err) => {
-    console.error('❌ MongoDB connection error:', err);
-});
+db.once('open', () => console.log("✅ Successfully connected to MongoDB Atlas."));
+db.on('error', (err) => console.error('❌ MongoDB connection error:', err));
+
+// Models
+const Activity = mongoose.model("Activity", ActivitySchema);
+const User = mongoose.model("User", UserSchema);
+const TempUser = mongoose.model("TempUser", TempUserSchema);
 
 // Nodemailer setup
 const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
-        user: process.env.MAILID,   // your gmail
-        pass: process.env.MAILPASS    // app password
+        user: process.env.MAILID, 
+        pass: process.env.MAILPASS
     }
 });
 
-const Activity = mongoose.model("Activity", ActivitySchema);
-const User = mongoose.model("User", UserSchema);
-const TempUser = mongoose.model("TempUser", TempUserSchema);
+// Helper Functions
+async function hashPassword(password) {
+    return await bcryptjs.hash(password, 10);
+}
 
-// Middleware to verify JWT token
+async function comparePasswords(plain, hashed) {
+    return await bcryptjs.compare(plain, hashed);
+}
+
+function generateToken(payload) {
+    return jwt.sign(payload, process.env.KEY, { expiresIn: '7d' });
+}
+
+// JWT Middleware
 function verifyToken(req, res, next) {
     const authHeader = req.headers['authorization'];
-    if (!authHeader) return res.status(403).json({ error: 'Token required' });
+    if (!authHeader) return res.status(403).json({ error: { code: 'TOKEN_MISSING', message: 'Token required' } });
 
     const token = authHeader.split(' ')[1];
-    if (!token) return res.status(403).json({ error: 'Token required' });
+    if (!token) return res.status(403).json({ error: { code: 'TOKEN_MISSING', message: 'Token required' } });
 
     jwt.verify(token, process.env.KEY, (err, decoded) => {
-        if (err) return res.status(401).json({ error: 'Invalid token' });
+        if (err) return res.status(401).json({ error: { code: 'TOKEN_INVALID', message: 'Invalid token' } });
         req.user = decoded;
         next();
     });
 }
 
+// -------------------- Routes -------------------- //
+
+// Test
+app.get("/api/test", (req, res) => {
+    res.json({ message: "Server is up and running 🚀" });
+});
+
+// -------------------- Signup with OTP -------------------- //
+
 app.post("/api/send-otp", async (req, res) => {
     try {
         const { name, email, password, RecoveryEmail, RecoveryPassword } = req.body;
         if (!name || !email || !password) {
-            return res.status(400).json({ error: "Name, email, and password are required" });
+            return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Name, email, and password are required" } });
         }
 
         const existingUser = await User.findOne({ name });
-        if (existingUser) return res.status(400).json({ error: "Username already taken" });
+        if (existingUser) return res.status(409).json({ error: { code: 'USERNAME_TAKEN', message: "Username already taken" } });
 
         const hashedPassword = await hashPassword(password);
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Save temporary user with OTP
-        await TempUser.create({
-            name,
-            email,
-            password: hashedPassword,
-            RecoveryEmail: RecoveryEmail || null,
-            RecoveryPassword: RecoveryPassword || null,
-            otp
-        });
+        // Save temporary user
+        await TempUser.create({ name, email, password: hashedPassword, RecoveryEmail, RecoveryPassword, otp });
 
         // Send OTP email
         await transporter.sendMail({
@@ -100,25 +112,24 @@ app.post("/api/send-otp", async (req, res) => {
             text: `Your OTP is ${otp}. It will expire in 5 minutes.`
         });
 
-        res.json({ message: "OTP sent successfully" });
+        res.status(200).json({ message: "OTP sent successfully" });
 
     } catch (err) {
         console.error("Send OTP error:", err);
-        res.status(500).json({ error: "Failed to send OTP" });
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: "Failed to send OTP" } });
     }
 });
-
 
 app.post("/api/verify-otp", async (req, res) => {
     try {
         const { email, otp } = req.body;
-        if (!email || !otp) return res.status(400).json({ error: "Email and OTP are required" });
+        if (!email || !otp) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Email and OTP are required" } });
 
         const tempUser = await TempUser.findOne({ email, otp });
-        if (!tempUser) return res.status(400).json({ error: "Invalid or expired OTP" });
+        if (!tempUser) return res.status(400).json({ error: { code: 'OTP_INVALID', message: "Invalid or expired OTP" } });
 
-        // Create user in permanent collection
-        await User.create({
+        // Create permanent user
+        const user = await User.create({
             name: tempUser.name,
             email: tempUser.email,
             password: tempUser.password,
@@ -130,72 +141,63 @@ app.post("/api/verify-otp", async (req, res) => {
         await TempUser.deleteMany({ email });
 
         // Generate JWT
-        const token = jwt.sign({ name: tempUser.name }, process.env.KEY);
+        const token = generateToken({ name: user.name });
 
-        res.json({ message: "Account created successfully!", token });
+        res.status(201).json({ message: "Account created successfully!", token });
 
     } catch (err) {
         console.error("Verify OTP error:", err);
-        res.status(500).json({ error: "Failed to verify OTP" });
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: "Failed to verify OTP" } });
     }
 });
 
-// Login route
-app.post('/api/login', async (req, res) => {
-    console.log("Received login request");
-    try {
-        const existingUser = await User.findOne({ name: req.body.name });
+// -------------------- Login -------------------- //
 
-        if (!existingUser || !(await compare(req.body.password, existingUser.password))) {
-            return res.status(401).json({ error: 'Incorrect Username or Password' });
+app.post('/api/login', async (req, res) => {
+    try {
+        const { name, password } = req.body;
+        if (!name || !password) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Name and password are required" } });
+
+        const user = await User.findOne({ name });
+        if (!user || !(await comparePasswords(password, user.password))) {
+            return res.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: "Incorrect Username or Password" } });
         }
 
-        const token = jwt.sign({ name: existingUser.name }, process.env.KEY);
-        return res.json({ status: 'Success', token });
+        const token = generateToken({ name: user.name });
+        res.status(200).json({ message: "Login successful", token });
+
     } catch (err) {
         console.error("Login error:", err);
-        res.status(500).send('Server side error.');
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: "Login failed" } });
     }
 });
 
-async function hashPassword(password) {
-    return await bcryptjs.hash(password, 10);
-}
+// -------------------- Activity -------------------- //
 
-async function compare(userPass, hashPass) {
-    return await bcryptjs.compare(userPass, hashPass);
-}
-
-// Test route
-app.get("/api/test", (req, res) => {
-    res.json({ message: "Server is up and running 🚀" });
-});
-
-// Add Activity
 app.post('/api/addactivity', verifyToken, async (req, res) => {
-    const { Name } = req.body;
     try {
-        await Activity.create({
-            user: req.user.name,
-            Game: `${Name}`
-        });
-        return res.json({ Data: "Successfully added new activity" });
-    }
-    catch (err) {
-        res.status(500).json({ error: err.message });
+        const { Name } = req.body;
+        if (!Name) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Activity Name is required" } });
+
+        await Activity.create({ user: req.user.name, Game: Name });
+        res.status(201).json({ message: "Activity added successfully" });
+
+    } catch (err) {
+        console.error("Add activity error:", err);
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
     }
 });
 
-// Get Activity
 app.get('/api/getactivity', verifyToken, async (req, res) => {
     try {
-        const activity = await Activity.find({ user: req.user.name }).sort({ timestamp: -1 }).limit(10);
-        res.json(activity);
+        const activities = await Activity.find({ user: req.user.name }).sort({ timestamp: -1 }).limit(10);
+        res.status(200).json({ activities });
+
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("Get activity error:", err);
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
     }
 });
 
-app.listen(port, () => {
-    console.log(`🚀 Server started, listening on port ${port}`);
-});
+// -------------------- Server -------------------- //
+app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
