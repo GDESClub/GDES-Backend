@@ -1,51 +1,58 @@
-const express = require('express')
-const mongoose = require('mongoose')
-const path = require('path')
-const jwt = require('jsonwebtoken')
-const cookieParser = require('cookie-parser')
-const bcryptjs = require('bcryptjs')
-require('dotenv').config()
-const cors = require('cors')
-const { UserSchema } = require('./Schemas/UserSchema')
-const { ActivitySchema } = require('./Schemas/ActivitySchema')
+const mongoose = require('mongoose');
+const express = require('express');
+const cookieParser = require('cookie-parser');
+const cors = require('cors');
+const bcryptjs = require('bcryptjs');
+const nodemailer = require('nodemailer');
+const path = require('path');
+const jwt = require('jsonwebtoken');
 
-const port = process.env.PORT
-const URL = process.env.MONGOURL
-const app = express()
-app.use(express.json())
-app.use(cookieParser())
-app.use(express.urlencoded({ extended: true }))
+require('dotenv').config();
 
-/*
-app.use(cors({
-  origin: 'https://evlens.vercel.app',
-  credentials: true,
-}));
-*/
+const { UserSchema } = require('./Schemas/UserSchema');
+const { ActivitySchema } = require('./Schemas/ActivitySchema');
+const { TempUserSchema } = require('./Schemas/TempUseSchema');
+const port = process.env.PORT || 3000;
+const URL = process.env.MONGOURL;
+const app = express();
 
+app.use(express.json());
+app.use(cookieParser());
+app.use(express.urlencoded({ extended: true }));
+
+// Going to restrict access when frontend is deployed.
 app.use(cors());
 
-const templatePath = path.join(__dirname, "/templates")
-const publicPath = path.join(__dirname, "/public")
+const templatePath = path.join(__dirname, "/templates");
+const publicPath = path.join(__dirname, "/public");
 
-app.set('view engine', 'hbs')
-app.set('views', templatePath)
-app.use(express.static(publicPath))
-
+app.set('view engine', 'hbs');
+app.set('views', templatePath);
+app.use(express.static(publicPath));
 
 // Connect to MongoDB
-mongoose.connect(URL)
-const db = mongoose.connection
+mongoose.connect(URL);
+const db = mongoose.connection;
 
 db.once('open', () => {
-    console.log("Successfully connected to MongoDB Atlas.");
-})
+    console.log("✅ Successfully connected to MongoDB Atlas.");
+});
 db.on('error', (err) => {
-    console.error('MongoDB connection error:', err);
-})
+    console.error('❌ MongoDB connection error:', err);
+});
+
+// Nodemailer setup
+const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+        user: process.env.MAILID,   // your gmail
+        pass: process.env.MAILPASS    // app password
+    }
+});
 
 const Activity = mongoose.model("Activity", ActivitySchema);
 const User = mongoose.model("User", UserSchema);
+const TempUser = mongoose.model("TempUser", TempUserSchema);
 
 // Middleware to verify JWT token
 function verifyToken(req, res, next) {
@@ -62,30 +69,74 @@ function verifyToken(req, res, next) {
     });
 }
 
-// Signup route
-app.post('/api/signup', async (req, res) => {
+app.post("/api/send-otp", async (req, res) => {
     try {
-        const existingUser = await User.findOne({ name: req.body.name });
-        if (existingUser) {
-            return res.status(400).json({ error: 'Username not available' });
+        const { name, email, password, RecoveryEmail, RecoveryPassword } = req.body;
+        if (!name || !email || !password) {
+            return res.status(400).json({ error: "Name, email, and password are required" });
         }
 
-        const hashedPassword = await hashPassword(req.body.password);
-        const token = jwt.sign({ name: req.body.name }, process.env.KEY);
+        const existingUser = await User.findOne({ name });
+        if (existingUser) return res.status(400).json({ error: "Username already taken" });
 
-        const data = {
-            name: req.body.name,
-            email: req.body.email,
+        const hashedPassword = await hashPassword(password);
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Save temporary user with OTP
+        await TempUser.create({
+            name,
+            email,
             password: hashedPassword,
-            RecoveryEmail: req.body.RecoveryEmail || null,
-            RecoveryPassword: req.body.RecoveryPassword || null
-        };
-        await User.create(data);
-        res.status(201).json({ message: 'Successfully created account.' });
+            RecoveryEmail: RecoveryEmail || null,
+            RecoveryPassword: RecoveryPassword || null,
+            otp
+        });
+
+        // Send OTP email
+        await transporter.sendMail({
+            from: process.env.MAILID,
+            to: email,
+            subject: "Verify your email",
+            text: `Your OTP is ${otp}. It will expire in 5 minutes.`
+        });
+
+        res.json({ message: "OTP sent successfully" });
+
+    } catch (err) {
+        console.error("Send OTP error:", err);
+        res.status(500).json({ error: "Failed to send OTP" });
     }
-    catch (err) {
-        console.error("Signup error:", err);
-        res.status(500).json({ message: `${err} :Server side error.` });
+});
+
+
+app.post("/api/verify-otp", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        if (!email || !otp) return res.status(400).json({ error: "Email and OTP are required" });
+
+        const tempUser = await TempUser.findOne({ email, otp });
+        if (!tempUser) return res.status(400).json({ error: "Invalid or expired OTP" });
+
+        // Create user in permanent collection
+        await User.create({
+            name: tempUser.name,
+            email: tempUser.email,
+            password: tempUser.password,
+            RecoveryEmail: tempUser.RecoveryEmail,
+            RecoveryPassword: tempUser.RecoveryPassword
+        });
+
+        // Remove temporary user
+        await TempUser.deleteMany({ email });
+
+        // Generate JWT
+        const token = jwt.sign({ name: tempUser.name }, process.env.KEY);
+
+        res.json({ message: "Account created successfully!", token });
+
+    } catch (err) {
+        console.error("Verify OTP error:", err);
+        res.status(500).json({ error: "Failed to verify OTP" });
     }
 });
 
@@ -146,6 +197,5 @@ app.get('/api/getactivity', verifyToken, async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`server started, listening to port ${port}`);
+    console.log(`🚀 Server started, listening on port ${port}`);
 });
-
