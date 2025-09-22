@@ -21,7 +21,7 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
+app.use(cors({ origin: 'http://localhost:5173' }));
 
 const templatePath = path.join(__dirname, "/templates");
 const publicPath = path.join(__dirname, "/public");
