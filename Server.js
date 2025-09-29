@@ -22,7 +22,7 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(cors());
 
 const templatePath = path.join(__dirname, "/templates");
 const publicPath = path.join(__dirname, "/public");
@@ -39,6 +39,7 @@ db.once('open', () => console.log("✅ Successfully connected to MongoDB Atlas."
 db.on('error', (err) => console.error('❌ MongoDB connection error:', err));
 
 // Models
+const Game = mongoose.model("Game", GameSchema);
 const Activity = mongoose.model("Activity", ActivitySchema);
 const User = mongoose.model("User", UserSchema);
 const TempUser = mongoose.model("TempUser", TempUserSchema);
