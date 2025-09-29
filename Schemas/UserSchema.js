@@ -20,5 +20,14 @@ export const UserSchema = new mongoose.Schema({
     RecoveryPassword:{
         type: String,
         required: false,
+    },
+        likedGames: {
+        type: [String], 
+        default: []
+    },
+    ratedGames: {
+        type: Map,
+        of: Number,
+        default: {}
     }
 })

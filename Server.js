@@ -213,5 +213,57 @@ app.get('/api/getactivity', verifyToken, async (req, res) => {
     }
 });
 
+// -------------------- User Interactions -------------------- //
+
+// ENDPOINT TO TOGGLE A LIKE ON A GAME
+app.post('/api/user/like', verifyToken, async (req, res) => {
+    try {
+        const { gameId } = req.body;
+        if (!gameId) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Game ID is required" } });
+
+        const user = await User.findOne({ name: req.user.name });
+        if (!user) return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: "User not found" } });
+
+        const isLiked = user.likedGames.includes(gameId);
+        
+        if (isLiked) {
+            // If already liked, remove it (unlike)
+            user.likedGames.pull(gameId);
+        } else {
+            // Otherwise, add it
+            user.likedGames.push(gameId);
+        }
+        
+        await user.save();
+        res.status(200).json({ likedGames: user.likedGames });
+
+    } catch (err) {
+        console.error("Like game error:", err);
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
+    }
+});
+
+
+// ENDPOINT TO RATE A GAME
+app.post('/api/user/rate', verifyToken, async (req, res) => {
+    try {
+        const { gameId, rating } = req.body;
+        if (!gameId || !rating) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Game ID and rating are required" } });
+
+        const user = await User.findOne({ name: req.user.name });
+        if (!user) return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: "User not found" } });
+
+        user.ratedGames.set(gameId, rating); // Set or update the rating for the game
+        await user.save();
+
+        res.status(200).json({ ratedGames: Object.fromEntries(user.ratedGames) });
+
+    } catch (err) {
+        console.error("Rate game error:", err);
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
+    }
+});
+
+
 // -------------------- Server -------------------- //
 app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
