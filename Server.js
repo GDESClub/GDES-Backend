@@ -265,26 +265,32 @@ app.post('/api/user/rate', verifyToken, async (req, res) => {
         }
 
         const user = await User.findOne({ name: username });
-        const game = await Game.findOne({ name: new RegExp('^' + gameId.replace(/-/g, ' ') + '$', 'i')});
+        
+        const searchName = gameId.replace(/-/g, ' ');
+        const game = await Game.findOne({ name: new RegExp('^' + searchName + '$', 'i') });
 
         if (!user || !game) {
+            console.log(`User or Game not found. User: ${username}, Game Search Term: "${searchName}"`);
             return res.status(404).json({ error: { message: "User or Game not found" } });
         }
 
+        console.log(`--- Rating Update for: ${game.name} ---`);
         const previousRating = user.ratedGames.get(gameId) || 0;
+        console.log(`Previous user rating: ${previousRating}`);
 
         // Update the game's total rating points
         game.totalRatingPoints = (game.totalRatingPoints || 0) - previousRating + rating;
+        console.log(`New total rating points: ${game.totalRatingPoints}`);
 
         // If the user hadn't rated this game before, increment the count
         if (previousRating === 0) {
             game.ratingCount = (game.ratingCount || 0) + 1;
         }
+        console.log(`New rating count: ${game.ratingCount}`);
 
-        // --- THE FIX IS HERE ---
         // Recalculate the new average rating, preventing division by zero.
-        // If ratingCount is 0 for any reason, the rating will default to 0.
         game.rating = game.ratingCount > 0 ? game.totalRatingPoints / game.ratingCount : 0;
+        console.log(`Final calculated rating: ${game.rating}`);
 
         // Update the user's personal rating for this game
         user.ratedGames.set(gameId, rating);
