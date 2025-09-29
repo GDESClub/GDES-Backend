@@ -9,6 +9,7 @@ const jwt = require('jsonwebtoken');
 
 require('dotenv').config();
 
+const UserVisit = require('./Schemas/UserVisitSchema');
 const { GameSchema } = require('./Schemas/GameSchema');
 const { UserSchema } = require('./Schemas/UserSchema');
 const { ActivitySchema } = require('./Schemas/ActivitySchema');
@@ -215,30 +216,36 @@ app.get('/api/getactivity', verifyToken, async (req, res) => {
 
 // -------------------- User Interactions -------------------- //
 
-// ENDPOINT TO TOGGLE A LIKE ON A GAME
-app.post('/api/user/like', verifyToken, async (req, res) => {
+// ENDPOINT OF VISITING A GAME WITH 2 MINUTE COOLDOWN
+app.post('/api/games/:gameId/visit', verifyToken, async (req, res) => {
     try {
-        const { gameId } = req.body;
-        if (!gameId) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Game ID is required" } });
+        const { gameId } = req.params;
+        const username = req.user.name;
+        const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes in milliseconds
 
-        const user = await User.findOne({ name: req.user.name });
-        if (!user) return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: "User not found" } });
+        // Check for a recent visit by this user for this game
+        const recentVisit = await UserVisit.findOne({ username, gameId, lastVisited: { $gte: twoMinutesAgo } });
 
-        const isLiked = user.likedGames.includes(gameId);
-        
-        if (isLiked) {
-            // If already liked, remove it (unlike)
-            user.likedGames.pull(gameId);
-        } else {
-            // Otherwise, add it
-            user.likedGames.push(gameId);
+        if (recentVisit) {
+            // If a recent visit exists, do nothing and inform the client
+            return res.status(200).json({ message: "Cooldown active. Visit not counted." });
         }
-        
-        await user.save();
-        res.status(200).json({ likedGames: user.likedGames });
+
+        // If no recent visit, proceed to count it
+        // Use findOneAndUpdate to increment the visit count atomically
+        await Game.findOneAndUpdate({ name: gameId.replace(/-/g, ' ') }, { $inc: { visit_count: 1 } }, { new: true });
+
+        // Update or create the visit record for the user
+        await UserVisit.findOneAndUpdate(
+            { username, gameId },
+            { lastVisited: new Date() },
+            { upsert: true } // Creates a new document if one doesn't exist
+        );
+
+        res.status(200).json({ message: "Visit counted successfully." });
 
     } catch (err) {
-        console.error("Like game error:", err);
+        console.error("Game visit error:", err);
         res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
     }
 });
