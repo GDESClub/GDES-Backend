@@ -254,26 +254,52 @@ app.post('/api/games/:gameId/visit', verifyToken, async (req, res) => {
     }
 });
 
-
-// ENDPOINT TO RATE A GAME
+// ENDPOINT TO RATE A GAME (UPGRADED)
 app.post('/api/user/rate', verifyToken, async (req, res) => {
     try {
         const { gameId, rating } = req.body;
-        if (!gameId || !rating) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: "Game ID and rating are required" } });
+        const username = req.user.name;
 
-        const user = await User.findOne({ name: req.user.name });
-        if (!user) return res.status(404).json({ error: { code: 'USER_NOT_FOUND', message: "User not found" } });
+        if (!gameId || !rating) {
+            return res.status(400).json({ error: { message: "Game ID and rating are required" } });
+        }
 
-        user.ratedGames.set(gameId, rating); // Set or update the rating for the game
+        const user = await User.findOne({ name: username });
+        const game = await Game.findOne({ name: new RegExp('^' + gameId.replace(/-/g, ' ') + '$', 'i')});
+
+        if (!user || !game) {
+            return res.status(404).json({ error: { message: "User or Game not found" } });
+        }
+
+        const previousRating = user.ratedGames.get(gameId) || 0;
+
+        // Update the game's total rating points
+        game.totalRatingPoints = (game.totalRatingPoints || 0) - previousRating + rating;
+
+        // If the user hadn't rated this game before, increment the count
+        if (previousRating === 0) {
+            game.ratingCount = (game.ratingCount || 0) + 1;
+        }
+
+        // Recalculate the new average rating
+        game.rating = game.totalRatingPoints / game.ratingCount;
+
+        // Update the user's personal rating for this game
+        user.ratedGames.set(gameId, rating);
+
+        // Save both documents
         await user.save();
-
-        res.status(200).json({ ratedGames: Object.fromEntries(user.ratedGames) });
+        await game.save();
+        
+        // Return the new average rating to the frontend
+        res.status(200).json({ newAverageRating: game.rating });
 
     } catch (err) {
         console.error("Rate game error:", err);
-        res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
+        res.status(500).json({ error: { message: err.message } });
     }
 });
+
 
 
 // -------------------- Server -------------------- //

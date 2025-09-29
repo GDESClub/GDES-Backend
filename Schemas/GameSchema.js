@@ -32,6 +32,14 @@ const GameSchema = new mongoose.Schema({
     about: {
         type: String,
         required: [true, "About section is required"]
+    },    
+    ratingCount: {
+        type: Number,
+        default: 0
+    },
+    totalRatingPoints: {
+        type: Number,
+        default: 0
     },
     visit_count: {
         type: Number,
