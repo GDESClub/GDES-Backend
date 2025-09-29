@@ -29,9 +29,5 @@ export const UserSchema = new mongoose.Schema({
         type: Map,
         of: Number,
         default: {}
-    },
-    visit_count: {
-        type: Number,
-        default: 0
     }
 })

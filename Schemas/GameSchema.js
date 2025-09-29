@@ -32,6 +32,10 @@ const GameSchema = new mongoose.Schema({
     about: {
         type: String,
         required: [true, "About section is required"]
+    },
+    visit_count: {
+        type: Number,
+        default: 0
     }
 });
 
