@@ -254,7 +254,7 @@ app.post('/api/games/:gameId/visit', verifyToken, async (req, res) => {
     }
 });
 
-// ENDPOINT TO RATE A GAME (UPGRADED)
+// ENDPOINT TO RATE A GAME (UPGRADED AND RESILIENT)
 app.post('/api/user/rate', verifyToken, async (req, res) => {
     try {
         const { gameId, rating } = req.body;
@@ -265,41 +265,43 @@ app.post('/api/user/rate', verifyToken, async (req, res) => {
         }
 
         const user = await User.findOne({ name: username });
-        
         const searchName = gameId.replace(/-/g, ' ');
         const game = await Game.findOne({ name: new RegExp('^' + searchName + '$', 'i') });
 
         if (!user || !game) {
-            console.log(`User or Game not found. User: ${username}, Game Search Term: "${searchName}"`);
             return res.status(404).json({ error: { message: "User or Game not found" } });
         }
 
-        console.log(`--- Rating Update for: ${game.name} ---`);
+        // --- NEW SELF-HEALING LOGIC ---
+        // If ratingCount is invalid, reset both counts to ensure data integrity.
+        if (!game.ratingCount || game.ratingCount <= 0) {
+            game.ratingCount = 0;
+            game.totalRatingPoints = 0;
+        }
+        // --- END SELF-HEALING LOGIC ---
+
         const previousRating = user.ratedGames.get(gameId) || 0;
-        console.log(`Previous user rating: ${previousRating}`);
 
         // Update the game's total rating points
         game.totalRatingPoints = (game.totalRatingPoints || 0) - previousRating + rating;
-        console.log(`New total rating points: ${game.totalRatingPoints}`);
 
-        // If the user hadn't rated this game before, increment the count
+        // If this is the user's first time rating, increment the count
         if (previousRating === 0) {
             game.ratingCount = (game.ratingCount || 0) + 1;
         }
-        console.log(`New rating count: ${game.ratingCount}`);
 
-        // Recalculate the new average rating, preventing division by zero.
+        // Recalculate the new average rating, preventing division by zero
         game.rating = game.ratingCount > 0 ? game.totalRatingPoints / game.ratingCount : 0;
-        console.log(`Final calculated rating: ${game.rating}`);
+        
+        // Ensure rating doesn't exceed bounds due to any floating point issues
+        game.rating = Math.max(0, Math.min(5, game.rating));
 
         // Update the user's personal rating for this game
         user.ratedGames.set(gameId, rating);
 
-        // Save both documents
         await user.save();
         await game.save();
         
-        // Return the new average rating to the frontend
         res.status(200).json({ newAverageRating: game.rating });
 
     } catch (err) {
@@ -307,10 +309,6 @@ app.post('/api/user/rate', verifyToken, async (req, res) => {
         res.status(500).json({ error: { message: err.message } });
     }
 });
-
-
-
-
 
 // -------------------- Server -------------------- //
 app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
