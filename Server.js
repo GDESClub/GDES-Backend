@@ -9,6 +9,7 @@ const jwt = require('jsonwebtoken');
 
 require('dotenv').config();
 
+const { GameSchema } = require('./Schemas/GameSchema');
 const { UserSchema } = require('./Schemas/UserSchema');
 const { ActivitySchema } = require('./Schemas/ActivitySchema');
 const { TempUserSchema } = require('./Schemas/TempUseSchema');
@@ -81,10 +82,22 @@ function verifyToken(req, res, next) {
 
 // -------------------- Routes -------------------- //
 
-// Test
 app.get("/api/test", (req, res) => {
     res.json({ message: "Server is up and running 🚀" });
 });
+
+// -------------------- Game Data Routes -------------------- //
+
+app.get('/api/games', async (req, res) => {
+    try {
+        const games = await Game.find({});
+        res.status(200).json(games);
+    } catch (err) {
+        console.error("Get games error:", err);
+        res.status(500).json({ error: { code: 'SERVER_ERROR', message: "Failed to fetch games" } });
+    }
+});
+
 
 // -------------------- Signup with OTP -------------------- //
 
