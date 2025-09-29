@@ -281,8 +281,10 @@ app.post('/api/user/rate', verifyToken, async (req, res) => {
             game.ratingCount = (game.ratingCount || 0) + 1;
         }
 
-        // Recalculate the new average rating
-        game.rating = game.totalRatingPoints / game.ratingCount;
+        // --- THE FIX IS HERE ---
+        // Recalculate the new average rating, preventing division by zero.
+        // If ratingCount is 0 for any reason, the rating will default to 0.
+        game.rating = game.ratingCount > 0 ? game.totalRatingPoints / game.ratingCount : 0;
 
         // Update the user's personal rating for this game
         user.ratedGames.set(gameId, rating);
@@ -299,6 +301,8 @@ app.post('/api/user/rate', verifyToken, async (req, res) => {
         res.status(500).json({ error: { message: err.message } });
     }
 });
+
+
 
 
 
