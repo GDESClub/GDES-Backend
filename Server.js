@@ -233,7 +233,11 @@ app.post('/api/games/:gameId/visit', verifyToken, async (req, res) => {
 
         // If no recent visit, proceed to count it
         // Use findOneAndUpdate to increment the visit count atomically
-        await Game.findOneAndUpdate({ name: gameId.replace(/-/g, ' ') }, { $inc: { visit_count: 1 } }, { new: true });
+        await Game.findOneAndUpdate(
+            { name: new RegExp('^' + gameId.replace(/-/g, ' ') + '$', 'i') },
+            { $inc: { visit_count: 1 } },
+            { new: true }
+        );
 
         // Update or create the visit record for the user
         await UserVisit.findOneAndUpdate(
