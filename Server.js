@@ -310,5 +310,57 @@ app.post('/api/user/rate', verifyToken, async (req, res) => {
     }
 });
 
+// ENDPOINT TO GET LEADERBOARD DATA
+app.get('/api/leaderboard', async (req, res) => {
+    try {
+        // Use an aggregation pipeline to efficiently calculate rankings
+        const leaderboardData = await Activity.aggregate([
+            // Stage 1: Group activities by username and count them
+            {
+                $group: {
+                    _id: "$user",
+                    activityCount: { $sum: 1 }
+                }
+            },
+            // Stage 2: Sort by the highest activity count
+            { $sort: { activityCount: -1 } },
+            // Stage 3: Limit to the top 100 users
+            { $limit: 100 },
+            // Stage 4: Join with the 'users' collection to get avatar images
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "_id",
+                    foreignField: "name",
+                    as: "userData"
+                }
+            },
+            // Stage 5: Deconstruct the userData array
+            { $unwind: "$userData" },
+            // Stage 6: Format the final output
+            {
+                $project: {
+                    _id: 0, // Exclude the default _id
+                    name: "$_id",
+                    playtime: "$activityCount", // Rename activityCount to playtime
+                    img: "$userData.avatar"
+                }
+            }
+        ]);
+
+        // Add the position/rank to each entry
+        const rankedData = leaderboardData.map((user, index) => ({
+            pos: index + 1,
+            ...user
+        }));
+
+        res.status(200).json(rankedData);
+
+    } catch (err) {
+        console.error("Leaderboard error:", err);
+        res.status(500).json({ error: { message: err.message } });
+    }
+});
+
 // -------------------- Server -------------------- //
 app.listen(port, () => console.log(`🚀 Server running on port ${port}`));

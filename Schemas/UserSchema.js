@@ -20,6 +20,10 @@ export const UserSchema = new mongoose.Schema({
     RecoveryPassword:{
         type: String,
         required: false,
+    },    
+    avatar: {
+        type: String,
+        default: () => `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70)}`
     },
         likedGames: {
         type: [String], 
